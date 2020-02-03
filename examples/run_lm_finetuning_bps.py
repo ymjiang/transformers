@@ -261,7 +261,6 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
     
     optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
     hvd.broadcast_parameters(model.state_dict(), root_rank=0)
-    hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total
