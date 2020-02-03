@@ -237,7 +237,7 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
             return pad_sequence(examples, batch_first=True)
         return pad_sequence(examples, batch_first=True, padding_value=tokenizer.pad_token_id)
 
-    train_sampler = RandomSampler(train_dataset) if args.local_rank == -1 else DistributedSampler(train_dataset)
+    train_sampler = DistributedSampler(train_dataset, num_replicas=hvd.size(), rank=hvd.rank())
     train_dataloader = DataLoader(
         train_dataset, sampler=train_sampler, batch_size=args.train_batch_size, collate_fn=collate
     )
@@ -260,8 +260,8 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     
     optimizer = hvd.DistributedOptimizer(optimizer, named_parameters=model.named_parameters())
-    hvd.broadcast_parameters(model.state_dict(), root=0)
-    hvd.broadcast_optimizer_state(optimizer, root=0)
+    hvd.broadcast_parameters(model.state_dict(), root_rank=0)
+    hvd.broadcast_optimizer_state(optimizer, root_rank=0)
 
     scheduler = get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=t_total
@@ -293,7 +293,7 @@ def train(args, train_dataset, model: PreTrainedModel, tokenizer: PreTrainedToke
         "  Total train batch size (w. parallel, distributed & accumulation) = %d",
         args.train_batch_size
         * args.gradient_accumulation_steps
-        * (torch.distributed.get_world_size() if args.local_rank != -1 else 1),
+        * (hvd.size() if args.local_rank != -1 else 1),
     )
     logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
     logger.info("  Total optimization steps = %d", t_total)
@@ -608,12 +608,12 @@ def main():
         "See details at https://nvidia.github.io/apex/amp.html",
     )
 
-    # assign local rank
-    args.local_rank = hvd.local_rank()
-
     parser.add_argument("--server_ip", type=str, default="", help="For distant debugging.")
     parser.add_argument("--server_port", type=str, default="", help="For distant debugging.")
     args = parser.parse_args()
+
+    # assign local rank
+    args.local_rank = hvd.local_rank()
 
     if args.model_type in ["bert", "roberta", "distilbert", "camembert"] and not args.mlm:
         raise ValueError(
